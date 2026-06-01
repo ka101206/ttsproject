@@ -30,7 +30,8 @@ class ChineseTTSEngine:
                 on_done()
 
     async def _generate_and_play(self, text, speed):
-        temp_file = "temp_zh.mp3"
+        import uuid
+        temp_file = f"temp_zh_{uuid.uuid4().hex}.mp3"
         
         # Convert float speed to Edge-TTS string rate
         rate_percent = int((speed - 1.0) * 100)
@@ -47,8 +48,3 @@ class ChineseTTSEngine:
             print("⚠️ No audio player configured, skipping playback")
             
         # 3. Clean up the temp file
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except:
-                pass 

@@ -12,24 +12,28 @@ class TTSEngine:
         self.engine = None
         self.ja_g2p = ja.JAG2P()
         self.lock = threading.Lock()
+        self.cache = {}
         self.current_ja_voice = "jf_alpha"
         self.audio_player = audio_player  # callback: play_audio(filepath) -> blocks until done
+        threading.Thread(target=self._init_engine, daemon=True).start()
 
     def _init_engine(self):
-        if self.engine: return self.engine
-        target_model = "kokoro-v1.0.onnx"
-        if not os.path.exists(target_model):
-            found = glob.glob("*.onnx")
-            target_model = found[0] if found else None
-        if not target_model:
-            print("❌ TTS Error: No .onnx file found!")
-            return None
-        try:
-            self.engine = Kokoro(target_model, "voices.bin")
-            return self.engine
-        except Exception as e:
-            print(f"❌ TTS Init Error: {e}")
-            return None
+        with self.lock:
+            if self.engine: return self.engine
+            target_model = "kokoro-v1.0.onnx"
+            if not os.path.exists(target_model):
+                found = glob.glob("*.onnx")
+                target_model = found[0] if found else None
+            if not target_model:
+                print("❌ TTS Error: No .onnx file found!")
+                return None
+            try:
+                self.engine = Kokoro(target_model, "voices.bin")
+                print("✅ Japanese TTS Engine (Kokoro) loaded successfully!")
+                return self.engine
+            except Exception as e:
+                print(f"❌ TTS Init Error: {e}")
+                return None
 
     def set_voice(self, ja_voice):
         self.current_ja_voice = ja_voice
@@ -53,18 +57,25 @@ class TTSEngine:
                     if not clean_chunk:
                         continue 
                         
-                    print(f"🔊 Generating audio for chunk: {clean_chunk}")
-                    
-                    phonemes, _ = self.ja_g2p(clean_chunk)
-                    samples, sample_rate = engine.create(
-                        phonemes, voice=self.current_ja_voice, speed=speed, lang="j", is_phonemes=True
-                    )
+                    cache_key = (clean_chunk, self.current_ja_voice, speed)
+                    if cache_key in self.cache:
+                        samples, sample_rate = self.cache[cache_key]
+                        print(f"🔊 Using cached audio for: {clean_chunk}")
+                    else:
+                        print(f"🔊 Generating audio for chunk: {clean_chunk}")
+                        phonemes, _ = self.ja_g2p(clean_chunk)
+                        samples, sample_rate = engine.create(
+                            phonemes, voice=self.current_ja_voice, speed=speed, lang="j", is_phonemes=True
+                        )
+                        self.cache[cache_key] = (samples, sample_rate)
 
-                    sf.write('temp_audio.wav', samples, sample_rate)
+                    import uuid
+                    filename = f'temp_audio_{uuid.uuid4().hex}.mp3'
+                    sf.write(filename, samples, sample_rate)
 
                     # Play audio via browser callback
                     if self.audio_player:
-                        self.audio_player('temp_audio.wav')
+                        self.audio_player(filename)
                     else:
                         print("⚠️ No audio player configured, skipping playback")
 

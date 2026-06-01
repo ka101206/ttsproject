@@ -57,6 +57,9 @@ class EuropeanTTSEngine:
                 clean_chunk = chunk.strip()
                 if not clean_chunk:
                     continue
+                
+                import uuid
+                output_file = f"output_euro_{uuid.uuid4().hex}.wav"
                     
                 try:
                     with wave.open(output_file, "wb") as wav_file:

@@ -12,3 +12,11 @@ services:
     # Ensure Docker doesn't try to use native audio devices on Mac to prevent crashes
     environment:
       - SDL_AUDIODRIVER=dummy
+
+  tunnel:
+    image: alpine
+    container_name: polyglot-tunnel
+    command: sh -c "apk add --no-cache openssh-client && ssh -o StrictHostKeyChecking=no -p 443 -R0:polyglot-tts:8080 a.pinggy.io"
+    depends_on:
+      - polyglot-tts
+    restart: always

@@ -2,7 +2,7 @@
 
 A fully containerized, multi-lingual AI language tutor running inside a virtual Linux desktop. It uses Kokoro-ONNX, Piper-TTS, and Microsoft Edge-TTS engines to provide ultra-realistic speech synthesis in Japanese, Chinese, Korean, Spanish, French, and Italian — with AI-powered conversation, grammar tutoring, and vocabulary tracking.
 
-## ✨ Features
+## Features
 
 - **AI Conversation** — Chat with an AI tutor in your target language with automatic text-to-speech responses
 - **Multi-Language TTS** — Natural speech synthesis powered by Kokoro (Japanese), Piper (European), and Edge-TTS (Chinese/Korean)

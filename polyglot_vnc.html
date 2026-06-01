@@ -25,7 +25,9 @@
     <script type="module">
         import RFB from './core/rfb.js';
 
-        const url = 'ws://' + location.hostname + ':' + location.port + '/websockify';
+        const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const portPart = window.location.port ? ':' + window.location.port : '';
+        const url = protocol + window.location.hostname + portPart + '/websockify';
         const rfb = new RFB(document.getElementById('screen'), url);
 
         rfb.scaleViewport = true;
@@ -67,6 +69,18 @@
 
             // === Custom keyboard handling ===
             let composing = false;
+            let justComposed = false;
+            let syncQueue = Promise.resolve();
+
+            function syncIME(path, text) {
+                syncQueue = syncQueue.then(() => 
+                    fetch(path, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: text })
+                    })
+                ).catch(e => console.error(e));
+            }
 
             textarea.addEventListener('compositionstart', () => {
                 composing = true;
@@ -75,23 +89,16 @@
             // Live preview: send intermediate composition text to the input field
             textarea.addEventListener('compositionupdate', (e) => {
                 const text = e.data || '';
-                fetch('http://localhost:8081/compose', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text })
-                });
+                syncIME('/api/compose', text);
             });
 
             textarea.addEventListener('compositionend', (e) => {
                 composing = false;
+                justComposed = true;
                 const text = e.data || '';
                 // Send final composed text to input field
-                fetch('http://localhost:8081/insert', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text })
-                });
-                setTimeout(() => { textarea.value = ''; }, 20);
+                syncIME('/api/insert', text);
+                setTimeout(() => { textarea.value = ''; justComposed = false; }, 50);
             });
 
             // Forward non-composition key events to VNC
@@ -99,11 +106,20 @@
                 if (composing || e.isComposing || e.keyCode === 229) {
                     return;
                 }
+                // Suppress the Enter key that fires right after compositionend
+                // (the user pressed Enter to confirm composition, not to send)
+                if (justComposed && e.key === 'Enter') {
+                    e.preventDefault();
+                    return;
+                }
                 rfb._keyboard._handleKeyDown(e);
             });
 
             textarea.addEventListener('keyup', (e) => {
                 if (composing || e.isComposing || e.keyCode === 229) {
+                    return;
+                }
+                if (justComposed && e.key === 'Enter') {
                     return;
                 }
                 rfb._keyboard._handleKeyUp(e);
@@ -137,30 +153,33 @@
         // Polls the Python backend for audio files to play.
         // TTS engines generate audio files -> Python queues them -> JS plays them.
         let audioPlaying = false;
+        let lastPlayedFile = null;
 
         async function checkAudio() {
             if (audioPlaying) return;
             try {
-                const resp = await fetch('http://localhost:8081/audio/status');
+                const resp = await fetch('/api/audio/status');
                 const data = await resp.json();
-                if (data.file) {
+                if (data.file && data.file !== lastPlayedFile) {
+                    lastPlayedFile = data.file;
                     audioPlaying = true;
-                    const audioUrl = 'http://localhost:8081' + data.file;
+                    // Note: Python returns a path like '/audio/file/...', we prefix with '/api'
+                    const audioUrl = '/api' + data.file;
                     const audio = new Audio(audioUrl);
                     audio.volume = (typeof data.volume === 'number') ? data.volume : 1.0;
                     audio.onended = async () => {
                         audioPlaying = false;
-                        try { await fetch('http://localhost:8081/audio/done'); } catch(e) {}
+                        try { await fetch('/api/audio/done'); } catch(e) {}
                     };
                     audio.onerror = async () => {
                         console.error('Audio playback error');
                         audioPlaying = false;
-                        try { await fetch('http://localhost:8081/audio/done'); } catch(e) {}
+                        try { await fetch('/api/audio/done'); } catch(e) {}
                     };
                     audio.play().catch(err => {
                         console.error('Audio play failed:', err);
                         audioPlaying = false;
-                        fetch('http://localhost:8081/audio/done').catch(() => {});
+                        fetch('/api/audio/done').catch(() => {});
                     });
                 }
             } catch (e) {
@@ -168,8 +187,88 @@
             }
         }
 
-        // Poll every 400ms
+        // Poll every 400ms for audio playback
         setInterval(checkAudio, 400);
+
+        // === BROWSER MICROPHONE CAPTURE ===
+        let micActive = false;
+        let audioContext = null;
+        let mediaStream = null;
+        let scriptProcessor = null;
+
+        async function checkMicStatus() {
+            try {
+                const resp = await fetch('/api/audio/mic_status');
+                const data = await resp.json();
+                
+                if (data.active && !micActive) {
+                    startMicrophone();
+                } else if (!data.active && micActive) {
+                    stopMicrophone();
+                }
+            } catch (e) {}
+        }
+
+        async function startMicrophone() {
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { 
+                        echoCancellation: true, 
+                        noiseSuppression: true, 
+                        autoGainControl: false 
+                    }, 
+                    video: false 
+                });
+                micActive = true;
+                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                
+                scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+                
+                source.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+                
+                scriptProcessor.onaudioprocess = (e) => {
+                    if (!micActive) return;
+                    
+                    const float32Array = e.inputBuffer.getChannelData(0);
+                    const int16Array = new Int16Array(float32Array.length);
+                    
+                    for (let i = 0; i < float32Array.length; i++) {
+                        let s = Math.max(-1, Math.min(1, float32Array[i]));
+                        int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                    
+                    fetch('/api/audio/input', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/octet-stream' },
+                        body: int16Array.buffer
+                    }).catch(err => {});
+                };
+            } catch (err) {
+                console.error("Microphone access denied or failed", err);
+            }
+        }
+
+        function stopMicrophone() {
+            micActive = false;
+            if (scriptProcessor) {
+                scriptProcessor.disconnect();
+                scriptProcessor = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+        }
+
+        // Poll every 500ms for mic status
+        setInterval(checkMicStatus, 500);
     </script>
 </head>
 

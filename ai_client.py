@@ -13,7 +13,7 @@ class AIClient:
     def clear_history(self):
         self.conversation_history = []
         
-    def get_reply(self, user_text, target_language):
+    def get_reply(self, user_text, target_language, difficulty="Intermediate"):
         system_prompt = f"""[ROLE]
 You are a human language exchange partner chatting via text message. You are NOT an AI assistant. You are brief, natural, and highly conversational.
 
@@ -25,6 +25,7 @@ You are a human language exchange partner chatting via text message. You are NOT
    - If the user speaks formally, YOU MUST SPEAK FORMALLY.
    - If the user speaks casually/informally, YOU MUST SPEAK CASUALLY.
    - Do not mix formal and casual grammar in the same response.
+4. SAFETY FILTER: Do not discuss or generate content that is violent, explicit, R-18, or inappropriate for a school environment. Graciously decline if prompted.
 
 [LANGUAGE RULES: {target_language}]
 1. EXCLUSIVE LANGUAGE: Speak ONLY in {target_language}.
@@ -44,6 +45,12 @@ User (Casual): 相談があるんだけど、いいかな？
 You (Casual): もちろん！何でも聞いてね。"""
         else:
             system_prompt += f"""2. FORMALITY DETECTION: Strictly obey the 'Two-Way Mirror' rule for {target_language} grammar."""
+
+        # Inject difficulty rules
+        diff_rules = config.DIFFICULTY_PROMPT_MODIFIERS.get(difficulty, config.DIFFICULTY_PROMPT_MODIFIERS["Intermediate"])
+        system_prompt += f"""\n\n[DIFFICULTY LEVEL: {difficulty}]
+You must strictly constrain your language to match the requested difficulty tier:
+{diff_rules}"""
 
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(self.conversation_history)

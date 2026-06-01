@@ -30,7 +30,8 @@ class KoreanTTSEngine:
                 on_done()
 
     async def _generate_and_play(self, text, speed):
-        temp_file = "temp_ko.mp3"
+        import uuid
+        temp_file = f"temp_ko_{uuid.uuid4().hex}.mp3"
         
         # Convert 0.5 - 2.0 multiplier to Edge-TTS percentage format (e.g. "+50%" or "-20%")
         rate_percent = int((speed - 1.0) * 100)
@@ -44,9 +45,3 @@ class KoreanTTSEngine:
             self.audio_player(temp_file)
         else:
             print("⚠️ No audio player configured, skipping playback")
-            
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except:
-                pass

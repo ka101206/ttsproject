@@ -19,8 +19,12 @@ x11vnc -display :99 -nopw -listen localhost -xkb -forever &
 # Replace vnc.html with our wrapper page that auto-scales and includes IME input
 cp /app/polyglot_vnc.html /usr/share/novnc/vnc.html
 
-# Start noVNC (HTML5 VNC Client on port 8080)
-/usr/share/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 8080 &
+# Start noVNC (HTML5 VNC Client on internal port 6080)
+/usr/share/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 6080 &
+
+# Start Nginx (Reverse Proxy on port 8080)
+cp /app/nginx.conf /etc/nginx/nginx.conf
+nginx
 
 echo "=========================================================="
 echo "🌐 GUI is ready! Open http://localhost:8080/vnc.html?autoconnect=true&resize=scale in your browser."
