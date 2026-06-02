@@ -48,3 +48,52 @@ DIFFICULTY_SPEEDS = {
     "Pre-Advanced": 1.1,
     "Advanced": 1.2
 }
+
+# --- Scenarios ---
+SCENARIOS = {
+    "Restaurant": {
+        "title": "Ordering at a Restaurant",
+        "user_role": "Customer",
+        "ai_role": "Waiter",
+        "user_goal": "Order a random dish.",
+        "goal": "The user must order a specific dish. (Asking for recommendations or asking what is on the menu is NOT ordering. They must explicitly place an order).",
+        "start_instruction": "Welcome the customer and politely ask if they have decided on their order. If the target language is Japanese, you MUST say exactly: 'いらっしゃいませ。ご注文はお決まりですか？'",
+        "persona_instruction": "You are a professional waiter. Speak ONLY in natural, polite customer service language appropriate for the target language (e.g. Keigo in Japanese, formal 'usted' in Spanish). Do NOT use casual language. Keep your responses short."
+    },
+    "Classroom": {
+        "title": "New Class Introduction",
+        "user_role": "New Student",
+        "ai_role": "Teacher",
+        "user_goal": "Introduce your name, age, hobby, and end with a greeting.",
+        "goal": "The user must introduce their name, age, AND hobby, and end with a greeting. (They must provide ALL 4 pieces of information).",
+        "start_instruction": "Warmly introduce the new student to the class and ask them to introduce themselves. If the target language is Japanese, you MUST say exactly: '新しい生徒を紹介します。自己紹介をお願いします。'",
+        "persona_instruction": "You are a friendly teacher. Speak politely but warmly and naturally to your students. Keep your responses short."
+    },
+    "Shopping": {
+        "title": "Buying Clothes",
+        "user_role": "Customer",
+        "ai_role": "Shop Clerk",
+        "user_goal": "Ask for a different size of clothing and buy it.",
+        "goal": "The user must ask if a different size is available. You must say yes and offer it. Then, the user must explicitly say they will buy it. Do NOT append [GOAL_REACHED] until they explicitly declare they are buying it.",
+        "start_instruction": "Welcome the customer and ask if they are looking for anything specific. If the target language is Japanese, you MUST say exactly: 'いらっしゃいませ。何かお探しですか？'",
+        "persona_instruction": "You are a polite retail shop clerk. Speak ONLY in natural, polite customer service language appropriate for the target language (e.g. Keigo in Japanese). Keep your responses short."
+    },
+    "Directions": {
+        "title": "Asking for Directions",
+        "user_role": "Tourist",
+        "ai_role": "Local",
+        "user_goal": "Ask how to get to the train station and thank them.",
+        "goal": "The user must ask for directions to the train station. You must give them directions. Then, the user must explicitly thank you. Do NOT append [GOAL_REACHED] until they explicitly thank you for the directions.",
+        "start_instruction": "Notice the tourist looking lost and politely ask if they need help. If the target language is Japanese, you MUST say exactly: 'どうかしましたか？道に迷いましたか？'",
+        "persona_instruction": "You are a helpful local citizen. Speak politely and naturally to a stranger. Keep your responses short."
+    },
+    "Convenience Store": {
+        "title": "Convenience Store Checkout",
+        "user_role": "Customer",
+        "ai_role": "Cashier",
+        "user_goal": "State whether you need a plastic bag, then pay.",
+        "goal": "The user must state if they need a plastic bag. You must then ask for payment. Finally, the user must explicitly say they are paying (e.g. 'I will pay by card' or 'Here is the cash'). Do NOT append [GOAL_REACHED] until they explicitly pay.",
+        "start_instruction": "Welcome the customer and ask if they need a plastic bag for their items. If the target language is Japanese, you MUST say exactly: 'いらっしゃいませ。レジ袋はご利用ですか？'",
+        "persona_instruction": "You are a fast-paced convenience store cashier. Speak ONLY in standard customer service language appropriate for the target language (e.g. Keigo in Japanese). Keep your responses short."
+    }
+}

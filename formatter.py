@@ -12,10 +12,23 @@ class TextFormatter:
         result = self.kks.convert(text)
         formatted_text = ""
 
+        override_dict = {
+            "入っ": "はいっ",
+            "入る": "はいる",
+            "厚": "あつ",
+            "切り": "ぎり",
+            "辛い": "からい",
+            "辛": "から"
+        }
+
         for item in result:
             orig = item['orig']
             hira = item['hira']
             kana = item['kana']
+            
+            if orig in override_dict:
+                hira = override_dict[orig]
+                kana = override_dict[orig]
 
             if mode == "ふりがな":
                 # Check if it's already Hiragana/Katakana

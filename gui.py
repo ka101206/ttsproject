@@ -131,6 +131,7 @@ class PolyglotApp:
         self.is_ai_talking = False
         self.is_processing = False
         self.last_spoken_text = "" 
+        self.active_scenario = None
 
         # UI Variables
         self.timeout_var = tk.DoubleVar(value=config.DEFAULT_SILENCE_TIMEOUT)
@@ -333,17 +334,32 @@ class PolyglotApp:
                     
             self.browser_audio_queue.task_done()
 
+    def get_active_input_field(self):
+        focus = self.root.focus_get()
+        if focus in (self.input_field, getattr(self, 'scenario_input_field', None), getattr(self, 'grammar_input_field', None)):
+            return focus
+        if hasattr(self, 'scenario_window') and self.scenario_window.winfo_exists():
+            return getattr(self, 'scenario_input_field', self.input_field)
+        if getattr(self, 'grammar_window', None) and self.grammar_window.winfo_exists():
+            return getattr(self, 'grammar_input_field', self.input_field)
+        return self.input_field
+
     def insert_and_send(self, text):
         if not text: return
-        self.input_field.delete(0, "end")
-        self.input_field.insert(0, text)
-        self.send_message()
+        target = self.get_active_input_field()
+        target.delete(0, "end")
+        target.insert(0, text)
+        if target == getattr(self, 'scenario_input_field', None):
+            self.send_scenario_message()
+        else:
+            self.send_message()
 
     def set_input_text(self, text):
         """Replace input field content entirely."""
-        self.input_field.delete(0, "end")
+        target = self.get_active_input_field()
+        target.delete(0, "end")
         if text:
-            self.input_field.insert(0, text)
+            target.insert(0, text)
         self._composing_preview_len = 0
 
     def compose_preview(self, text):
@@ -354,15 +370,16 @@ class PolyglotApp:
             
         if time.time() - getattr(self, '_last_finalize_time', 0) < 0.5 and text == getattr(self, '_last_finalized_text', ''):
             return  # Ignore stray delayed preview requests
+        target = self.get_active_input_field()
         # Remove previous preview characters from the end
         if getattr(self, '_composing_preview_len', 0) > 0:
-            current = self.input_field.get()
+            current = target.get()
             base = current[:-self._composing_preview_len]
-            self.input_field.delete(0, "end")
-            self.input_field.insert(0, base)
+            target.delete(0, "end")
+            target.insert(0, base)
         # Append new preview
         if text:
-            self.input_field.insert("end", text)
+            target.insert("end", text)
             self._composing_preview_len = len(text)
         else:
             self._composing_preview_len = 0
@@ -378,21 +395,22 @@ class PolyglotApp:
 
         self._last_finalize_time = time.time()
         self._last_finalized_text = text
+        target = self.get_active_input_field()
         # Remove the preview
         if getattr(self, '_composing_preview_len', 0) > 0:
-            current = self.input_field.get()
+            current = target.get()
             base = current[:-self._composing_preview_len]
-            self.input_field.delete(0, "end")
-            self.input_field.insert(0, base)
+            target.delete(0, "end")
+            target.insert(0, base)
         # Append final composed text
         if text:
-            self.input_field.insert("end", text)
+            target.insert("end", text)
         self._composing_preview_len = 0
 
     def insert_text_only(self, text):
         """Append text into the input field without sending (used by IME composition)."""
         if not text: return
-        self.input_field.insert("end", text)
+        self.get_active_input_field().insert("end", text)
 
     # --- HELP POP-UP ---
     def center_window(self, win, w, h):
@@ -423,6 +441,7 @@ class PolyglotApp:
             ("1.0x", "Speed Menu: Change playback speed for all replays."),
             ("➤", "Send: Push your typed message to the AI."),
             ("✆", "Conversation: Toggle hands-free voice-to-voice mode."),
+            ("⚑", "Scenario Mode: Practice real-world situations with specific goals."),
             ("💡", "Definitions: Highlight any word in the chat, then hover your mouse over the highlight to see its definition.")
         ]
 
@@ -483,6 +502,11 @@ class PolyglotApp:
         self.grammar_btn.bind("<ButtonRelease-1>", lambda e: self.toggle_grammar_panel())
         ToolTip(self.grammar_btn, "Open the side panel for grammar explanations.")
 
+        self.scenario_btn = tk.Label(self.ctrl_frame, text="⚑", font=("Arial", 28), cursor="hand2")
+        self.scenario_btn.pack(side="left", padx=10)
+        self.scenario_btn.bind("<Button-1>", lambda e: self.open_scenario_menu())
+        ToolTip(self.scenario_btn, "Scenario Mode: Practice real-world situations with specific goals.")
+
         self.settings_btn = tk.Label(self.ctrl_frame, text="⚙", fg="black", font=("Arial", 32), cursor="hand2")
         self.settings_btn.pack(side="right", padx=10)
         self.settings_btn.bind("<Button-1>", lambda e: self.toggle_settings())
@@ -503,6 +527,9 @@ class PolyglotApp:
         self.chat_display.tag_config("ai_clickable", foreground="#003366")
 
         self.chat_display.bind("<Motion>", self.on_chat_hover)
+        self.chat_display.bind("<MouseWheel>", self._on_mousewheel)
+        self.chat_display.bind("<Button-4>", self._on_mousewheel)
+        self.chat_display.bind("<Button-5>", self._on_mousewheel)
         self.chat_display.bind("<Leave>", lambda e: self.hide_chat_tooltip())
 
         # --- GRAMMAR TUTOR (Toplevel popup window) ---
@@ -779,13 +806,26 @@ class PolyglotApp:
     # --- REMAINING LOGIC (AI, TTS, STT) ---
     def on_language_change(self, e=None):
         self.ai.clear_history()
+        self.active_scenario = None
         if self.grammar_window is not None and self.grammar_window.winfo_exists():
             self.grammar_window.destroy()
             self.grammar_window = None
             
         new_lang = self.lang_var.get()
         new_scales = config.DIFFICULTY_SCALES.get(new_lang, ["Intermediate"])
-        self.difficulty_var.set(new_scales[2] if len(new_scales) > 2 else new_scales[0])
+        
+        old_diff_str = getattr(self, 'difficulty_var', None)
+        if old_diff_str and old_diff_str.get():
+            match = re.search(r'\((.*?)\)', old_diff_str.get())
+            old_level = match.group(1) if match else "Intermediate"
+        else:
+            old_level = "Intermediate"
+            
+        new_diff_str = next((s for s in new_scales if f"({old_level})" in s), None)
+        if not new_diff_str:
+            new_diff_str = new_scales[2] if len(new_scales) > 2 else new_scales[0]
+            
+        self.difficulty_var.set(new_diff_str)
         if hasattr(self, 'difficulty_menu') and self.difficulty_menu.winfo_exists():
             self.difficulty_menu.config(values=new_scales)
             
@@ -812,6 +852,7 @@ class PolyglotApp:
             engine.speak(text, speed=speed, **kwargs)
             finished.wait()
             self.browser_audio_queue.join()
+            self.is_processing = False
             self.set_status("idle")
             
         threading.Thread(target=run_and_wait, daemon=True).start()
@@ -873,12 +914,13 @@ class PolyglotApp:
 
     def send_message(self):
         text = self.input_field.get()
-        if not text: return
+        if not text or self.is_processing: return
         import time
         self._last_send_time = time.time()
         self._last_sent_text = text
         self._composing_preview_len = 0
 
+        self.is_processing = True
         self.update_chat("You", text)
         self.input_field.delete(0, "end")
         self.set_status("thinking")
@@ -890,6 +932,7 @@ class PolyglotApp:
         level = match.group(1) if match else "Intermediate"
         
         reply, success = self.ai.get_reply(text, lang, level)
+            
         if success:
             display = self.formatter.process(reply, lang, self.reading_var.get()) if lang == "Japanese" else reply
             self.root.after(0, lambda: self.update_chat("AI", display))
@@ -897,7 +940,186 @@ class PolyglotApp:
             self.play_tts(self.last_spoken_text, lang, self.talk_speed_var.get())
         else:
             self.root.after(0, lambda: self.update_chat("System", reply))
+            self.is_processing = False
             self.set_status("idle")
+
+    def update_scenario_chat(self, sender, text):
+        if not hasattr(self, 'scenario_chat_display') or not self.scenario_chat_display.winfo_exists():
+            return
+        self.scenario_chat_display.config(state="normal")
+        self.scenario_chat_display.insert("end", f"{sender}: ", "sender" if sender != "System" else "system")
+        self.scenario_chat_display.insert("end", text + "\n\n")
+        self.scenario_chat_display.config(state="disabled")
+        self.scenario_chat_display.see("end")
+
+    def generate_critique_bg(self, lang):
+        critique, success = self.ai.get_scenario_critique(lang)
+        if success:
+            self.root.after(0, lambda: self.update_scenario_chat("System", f"Feedback:\n{critique}"))
+        else:
+            self.root.after(0, lambda: self.update_scenario_chat("System", "Failed to generate critique."))
+        self.ai.clear_history()
+
+    def open_scenario_menu(self):
+        menu = tk.Toplevel(self.root)
+        menu.title("Choose a Scenario")
+        self.center_window(menu, 300, 300)
+        menu.configure(bg="#f0f0f0")
+        menu.transient(self.root)
+        menu.wait_visibility()
+        menu.grab_set()
+
+        tk.Label(menu, text="Scenarios", font=("Arial", 16, "bold"), bg="#f0f0f0").pack(pady=10)
+
+        for key, sc in config.SCENARIOS.items():
+            btn = tk.Button(menu, text=sc["title"], font=("Arial", 12),
+                            command=lambda k=key: self.start_scenario(k, menu))
+            btn.pack(fill="x", padx=20, pady=5)
+
+        tk.Button(menu, text="Cancel", command=menu.destroy).pack(pady=10)
+
+    def start_scenario(self, scenario_key, menu_window):
+        menu_window.destroy()
+        self.active_scenario = config.SCENARIOS[scenario_key]
+        self.ai.clear_history()
+        
+        self.scenario_window = tk.Toplevel(self.root)
+        self.scenario_window.title(f"Scenario: {self.active_scenario['title']}")
+        self.center_window(self.scenario_window, 800, 600)
+        self.scenario_window.configure(bg="#f0f0f0")
+        
+        # Scenario Input Field (Pack FIRST at the bottom)
+        input_frame = tk.Frame(self.scenario_window, bg="#f0f0f0")
+        input_frame.pack(side="bottom", fill="x", padx=20, pady=10)
+        
+        self.scenario_input_field = tk.Entry(input_frame, font=("Arial", 16))
+        self.scenario_input_field.pack(side="left", fill="x", expand=True)
+        self.scenario_input_field.bind("<Return>", lambda e: self.send_scenario_message())
+        
+        self.scenario_conv_btn = tk.Label(input_frame, text="✆", fg="black", bg="#ececec", cursor="hand2", font=("Arial", 24))
+        self.scenario_conv_btn.pack(side="right", padx=5)
+        self.bind_toggle_btn(self.scenario_conv_btn, self.toggle_scenario_conversation, lambda: self.conversation_running)
+        ToolTip(self.scenario_conv_btn, "Toggle hands-free voice-to-voice mode.")
+
+        send_btn = tk.Button(input_frame, text="➤", font=("Arial", 18), command=self.send_scenario_message)
+        send_btn.pack(side="right", padx=5)
+
+        # Scenario Chat Display (Takes remaining space)
+        self.scenario_chat_display = scrolledtext.ScrolledText(self.scenario_window, wrap="word", font=("Arial", 16),
+                                                              bg="white", fg="black")
+        self.scenario_chat_display.pack(side="top", padx=20, pady=20, fill="both", expand=True)
+        self.scenario_chat_display.config(state="disabled")
+        
+        # Tags for styling
+        self.scenario_chat_display.tag_config("sender", font=("Arial", 16, "bold"))
+        self.scenario_chat_display.tag_config("system", font=("Arial", 14, "italic"), foreground="#555")
+        
+        goal_msg = f"Started Scenario: {self.active_scenario['title']}\nRole: {self.active_scenario['user_role']}\nGoal: {self.active_scenario['user_goal']}"
+        self.update_scenario_chat("System", goal_msg)
+        
+        if "start_instruction" in self.active_scenario:
+            threading.Thread(target=self.generate_scenario_intro_bg, args=(self.active_scenario,), daemon=True).start()
+
+    def send_scenario_message(self):
+        text = self.scenario_input_field.get()
+        if not text or self.is_processing: return
+        self.is_processing = True
+        self.update_scenario_chat("You", text)
+        self.scenario_input_field.delete(0, "end")
+        self.set_status("thinking")
+        threading.Thread(target=self.run_scenario_ai_logic, args=(text, self.lang_var.get()), daemon=True).start()
+
+    def run_scenario_ai_logic(self, text, lang):
+        reply, success = self.ai.get_scenario_reply(text, lang, self.active_scenario)
+        if success:
+            goal_reached = False
+            if "[GOAL_REACHED]" in reply:
+                reply = reply.replace("[GOAL_REACHED]", "").strip()
+                goal_reached = True
+
+            display = self.formatter.process(reply, lang, self.reading_var.get()) if lang == "Japanese" else reply
+            self.root.after(0, lambda: self.update_scenario_chat("AI", display))
+            self.last_spoken_text = re.sub(r'[\*#\-]', '', reply).replace('\n', ' ')
+            self.play_tts(self.last_spoken_text, lang, self.talk_speed_var.get())
+            
+            if goal_reached:
+                self.root.after(0, lambda: self.update_scenario_chat("System", "Scenario completed! Generating critique..."))
+                self.root.after(0, lambda: self.scenario_input_field.config(state="disabled"))
+                threading.Thread(target=self.generate_critique_bg, args=(lang,), daemon=True).start()
+                self.active_scenario = None
+        else:
+            self.root.after(0, lambda: self.update_scenario_chat("System", reply))
+            self.is_processing = False
+            self.set_status("idle")
+
+    def toggle_scenario_conversation(self):
+        self.conversation_running = not self.conversation_running
+        if self.conversation_running:
+            self.scenario_conv_btn.config(bg="#a0a0a0")
+            threading.Thread(target=self.scenario_conversation_loop, daemon=True).start()
+        else:
+            self.scenario_conv_btn.config(bg="#ececec")
+            while not self.stt.audio_queue.empty():
+                try: self.stt.audio_queue.get_nowait()
+                except: break
+            self.set_status("idle")
+
+    def scenario_conversation_loop(self):
+        while self.conversation_running and hasattr(self, 'scenario_window') and self.scenario_window.winfo_exists():
+            if self.is_processing or self.is_ai_talking or self._audio_pending_file:
+                time.sleep(0.5); continue
+            self.set_status("listening")
+            try:
+                speech = self.stt.listen_and_transcribe(target_language=self.lang_codes.get(self.lang_var.get(), "en-US"), timeout=self.timeout_var.get(), status_check=lambda: self.conversation_running)
+                if not self.conversation_running or not hasattr(self, 'scenario_window') or not self.scenario_window.winfo_exists(): break
+                if speech and not speech.startswith("ERROR:"):
+                    self.execute_scenario_turn(speech.strip())
+            except: 
+                if self.conversation_running: self.set_status("idle"); time.sleep(1)
+        self.conversation_running = False
+        try: self.scenario_conv_btn.config(bg="#ececec")
+        except: pass
+        self.set_status("idle")
+
+    def execute_scenario_turn(self, user_text):
+        self.is_processing = True; self.is_ai_talking = True
+        self.root.after(0, lambda: self.update_scenario_chat("You", user_text))
+        lang = self.lang_var.get()
+        reply, success = self.ai.get_scenario_reply(user_text, lang, self.active_scenario)
+        if success:
+            goal_reached = False
+            if "[GOAL_REACHED]" in reply:
+                reply = reply.replace("[GOAL_REACHED]", "").strip()
+                goal_reached = True
+
+            display = self.formatter.process(reply, lang, self.reading_var.get()) if lang == "Japanese" else reply
+            self.root.after(0, lambda: self.update_scenario_chat("AI", display))
+            self.last_spoken_text = re.sub(r'[\*#\-]', '', reply).replace('\n', ' ')
+            self.play_tts_blocking(self.last_spoken_text, lang, self.talk_speed_var.get())
+            
+            if goal_reached:
+                self.root.after(0, lambda: self.update_scenario_chat("System", "Scenario completed! Generating critique..."))
+                self.root.after(0, lambda: self.scenario_input_field.config(state="disabled"))
+                threading.Thread(target=self.generate_critique_bg, args=(lang,), daemon=True).start()
+                self.active_scenario = None
+        else:
+            self.root.after(0, lambda: self.update_scenario_chat("System", reply))
+        self.is_processing = False; self.is_ai_talking = False; self.set_status("idle")
+
+    def generate_scenario_intro_bg(self, scenario_dict):
+        self.is_processing = True
+        lang = self.lang_var.get()
+        reply, success = self.ai.get_scenario_intro(lang, scenario_dict)
+        if success:
+            self.ai.conversation_history.append({"role": "assistant", "content": reply})
+            display = self.formatter.process(reply, lang, self.reading_var.get()) if lang == "Japanese" else reply
+            self.root.after(0, lambda: self.update_scenario_chat("AI", display))
+            self.last_spoken_text = re.sub(r'[\*#\-]', '', reply).replace('\n', ' ')
+            self.play_tts(self.last_spoken_text, lang, self.talk_speed_var.get())
+        else:
+            self.root.after(0, lambda: self.update_scenario_chat("System", "Failed to generate scenario intro."))
+        self.is_processing = False
+        self.set_status("idle")
 
     def trigger_replay(self):
         if self.last_spoken_text:
@@ -909,7 +1131,7 @@ class PolyglotApp:
             self.root.bind("<Return>", self.execute_partial_replay)
         else:
             self.root.unbind("<Return>")
-            self.input_field.bind("<Return>", lambda ev: self.send_message())
+            self.restore_return_bindings()
         self.update_button_visuals()
 
     def execute_partial_replay(self, e=None):
@@ -921,8 +1143,18 @@ class PolyglotApp:
         finally:
             self.partial_replay_mode = False
             self.root.unbind("<Return>")
-            self.input_field.bind("<Return>", lambda ev: self.send_message())
+            self.restore_return_bindings()
             self.update_button_visuals()
+
+    def restore_return_bindings(self):
+        self.input_field.bind("<Return>", lambda ev: self.send_message())
+        if getattr(self, 'scenario_input_field', None) and self.scenario_input_field.winfo_exists():
+            self.scenario_input_field.bind("<Return>", lambda e: self.send_scenario_message())
+        if getattr(self, 'grammar_input_field', None) and self.grammar_input_field.winfo_exists():
+            def grammar_enter(e):
+                self.send_grammar_question()
+                return "break"
+            self.grammar_input_field.bind("<Return>", grammar_enter)
 
     def toggle_conversation(self):
         self.conversation_running = not self.conversation_running
@@ -995,10 +1227,10 @@ class PolyglotApp:
         if not self.grammar_window or not self.grammar_window.winfo_exists():
             return
 
-        # Check if the user dragged the mouse (highlighting text)
+        # Check if the user dragged the mouse (highlighting text) - increased threshold to 10 pixels to prevent false drag detection on click
         dx = abs(event.x - getattr(self, '_press_x', event.x))
         dy = abs(event.y - getattr(self, '_press_y', event.y))
-        if dx > 3 or dy > 3:
+        if dx > 10 or dy > 10:
             return
 
         # It was a clean click. Clear any existing selection so they aren't stuck with highlighted text.
@@ -1110,6 +1342,12 @@ class PolyglotApp:
             self.grammar_text.see("end")
         except tk.TclError:
             pass  # Window was closed
+
+    def _on_mousewheel(self, event):
+        if event.num == 4 or getattr(event, 'delta', 0) > 0:
+            self.chat_display.yview_scroll(-1, "units")
+        elif event.num == 5 or getattr(event, 'delta', 0) < 0:
+            self.chat_display.yview_scroll(1, "units")
 
 if __name__ == "__main__":
     root = tk.Tk()

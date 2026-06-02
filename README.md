@@ -13,7 +13,7 @@ A fully containerized, multi-lingual AI language tutor running inside a virtual 
 - **Conversation Mode** — Hands-free voice-to-voice practice with speech recognition
 - **Replay Controls** — Full and partial replay at adjustable speeds
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Download the AI Models
 
@@ -61,13 +61,13 @@ To type in Japanese, Chinese, Korean, etc.:
 3. Type normally — the IME composition preview appears in real-time
 4. Press Enter to finalize the composed text, then Enter again to send
 
-### 🛑 Stopping the Application
+### Stopping the Application
 
 ```bash
 docker compose down
 ```
 
-## 🏗 Architecture
+## Architecture
 
 The app runs in a Docker container with a virtual desktop (Xvfb + Fluxbox + x11vnc), served to your browser via noVNC. A custom HTML wrapper (`polyglot_vnc.html`) adds:
 
@@ -75,7 +75,7 @@ The app runs in a Docker container with a virtual desktop (Xvfb + Fluxbox + x11v
 - **Browser Audio Bridge** — HTTP server on port 8081 queues TTS audio files; browser JS polls and plays them via HTML5 Audio API
 - **Grammar/IME Controls** — HTTP endpoints for toggling the grammar tutor and handling text composition
 
-## 📁 Key Files
+## Key Files
 
 | File | Purpose |
 |------|---------|
